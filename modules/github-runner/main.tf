@@ -1,82 +1,101 @@
-data "aws_ami" "ubuntu" {
-  most_recent = true
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+terraform {
+  backend "s3" {
+    bucket         = "demo-project-remote-backend"
+    region         = "us-west-2"
+    dynamodb_table = "terraform_locks"
   }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-
-  owners = ["099720109477"] # Canonical
 }
+
 module "ec2_instance" {
-  source                 = "terraform-aws-modules/ec2-instance/aws"
-  key_name               = "harshita"
-  associate_public_ip_address = true
-  name                   = "github-runner"
-  create_iam_instance_profile = true
-  iam_role_name          = "ec2-ssm"
-  ami                    = data.aws_ami.ubuntu.id
-  instance_type          = "t2.medium"
-  monitoring             = false
-  vpc_security_group_ids = [module.aws_sg.security_group_id]
-  subnet_id              = "subnet-00829907bb3a5414c"
-  user_data              = <<EOF
-  mkdir actions-runner && cd actions-runner
-  curl -o actions-runner-linux-x64-2.319.1.tar.gz -L https://github.com/actions/runner/releases/download/v2.319.1/actions-runner-linux-x64-2.319.1.tar.gz
-  echo "3f6efb7488a183e291fc2c62876e14c9ee732864173734facc85a1bfb1744464  actions-runner-linux-x64-2.319.1.tar.gz" | shasum -a 256 -c
-  tar xzf ./actions-runner-linux-x64-2.319.1.tar.gz
-  ./config.sh --url https://github.com/devops-harshita/terraform --token BKOHPKWXCS22NSPBCK5XGJTHAFWF2
-  ./run.sh
-  sudo ./svc.sh install
-  sudo ./svc.sh start
-  echo "Docker Installation Begins!"
-  # Add Docker's official GPG key:
-    sudo apt-get update
-    sudo apt-get install ca-certificates curl
-    sudo install -m 0755 -d /etc/apt/keyrings
-    sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-    sudo chmod a+r /etc/apt/keyrings/docker.asc
+  source  = "terraform-aws-modules/autoscaling/aws"
+  version = "v7.4.1"
+  name    = var.name
 
-    # Add the repository to Apt sources:
-    echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
-    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-    sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-    sudo apt-get update
-    sudo chmod 666 /var/run/docker.sock
-  apt install terraform
-  apt install docker
-  EOF
-  tags = {
-    Terraform   = "true"
-    Environment = "dev"
+  min_size            = var.min_size
+  max_size            = var.max_size
+  desired_capacity    = var.desired_capacity
+  user_data           = base64encode(var.userdata)
+  health_check_type   = var.health_check_type
+  vpc_zone_identifier = data.aws_subnets.public.ids
+  maintenance_options = {
+    auto_recovery = "default"
   }
+  initial_lifecycle_hooks     = var.initial_lifecycle_hooks
+  create_iam_instance_profile = true
+  iam_role_name               = var.iam_role_name
+  iam_role_policies           = var.iam_role_policies
+  instance_refresh            = var.instance_refresh
+
+  # Launch template
+  launch_template_name        = var.launch_template
+  launch_template_description = "Launch Template for github runner"
+  update_default_version      = true
+  image_id                    = data.aws_ami.ubuntu.id
+  key_name                    = var.key_name
+  instance_type               = var.instance_type
+  ebs_optimized               = var.ebs_optimized
+  enable_monitoring           = true
+
+  block_device_mappings = var.block_device_mappings
+  capacity_reservation_specification = {
+    capacity_reservation_preference = "open"
+  }
+
+  cpu_options = {
+    core_count       = 1
+    threads_per_core = 1
+  }
+
+  credit_specification = {
+    cpu_credits = "standard"
+  }
+
+  metadata_options = var.metadata_options
+
+  network_interfaces = [
+    {
+      associate_public_ip_address = true
+      delete_on_termination       = true
+      description                 = "eth0"
+      device_index                = 0
+      security_groups             = [module.sg.security_group_id]
+    }
+  ]
+
+  placement = {
+    availability_zone = "us-west-2a"
+  }
+
+  tag_specifications = var.tag_specifications
+
+  tags = var.tags
 }
 
-module "aws_sg" {
-  source = "terraform-aws-modules/security-group/aws"
+module "sg" {
+  source  = "terraform-aws-modules/security-group/aws"
+  version = "v5.1.0"
 
-  name        = "gitlab-sg"
-  description = "Security group for user-service with custom ports open within VPC, and PostgreSQL publicly open"
-  vpc_id      = "vpc-0f4cf75d17046431c"
-
-  ingress_cidr_blocks = ["0.0.0.0/0"]
-  #   ingress_rules            = ["tcp"]
+  name        = "github-runner-asg-sg"
+  description = "asg-github-runner ec2 sg"
+  vpc_id      = data.terraform_remote_state.vpc.outputs.vpc_id
   ingress_with_cidr_blocks = [
     {
       from_port   = 22
       to_port     = 22
       protocol    = "tcp"
-      description = "User-service ports"
+      description = "SSH from Anywhere"
       cidr_blocks = "0.0.0.0/0"
     }
   ]
-  egress_rules= [
-      "all-all"
-    ]
+  egress_with_cidr_blocks = [
+    {
+      from_port   = 0
+      to_port     = 0
+      protocol    = "-1"
+      description = "SSM Outbound"
+      cidr_blocks = "0.0.0.0/0"
+    }
+  ]
+
+  tags = var.tags
 }
