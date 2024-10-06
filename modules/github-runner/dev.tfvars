@@ -28,7 +28,7 @@ curl -o actions-runner-linux-x64-2.309.0.tar.gz -L https://github.com/actions/ru
 echo "2974243bab2a282349ac833475d241d5273605d3628f0685bd07fb5530f9bb1a  actions-runner-linux-x64-2.309.0.tar.gz" | shasum -a 256 -c
 tar xzf ./actions-runner-linux-x64-2.309.0.tar.gz
 chown ubuntu -R /actions-runner
-token "REPLACE TOKE HERE"
+token "BKOHPKS62YM2PWBN5LCVIFTHAKWKE"
 sudo -u ubuntu ./config.sh --url https://github.com/devops-harshita/terraform --token $token --name "runner-$(hostname)" --work _work --labels default --runnergroup default --unattended
 ./run.sh --once
 ./svc.sh install
