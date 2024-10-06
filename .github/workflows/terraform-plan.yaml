@@ -1,0 +1,58 @@
+name: Terraform Plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: 'Deployment Environment'
+        required: true
+        default: 'dev'
+      branch:
+        description: 'Deployment Branch'
+        required: true
+        default: 'main'
+      resource_deployment:
+        type: choice
+        description: Select the Terraform Module to Deploy it
+        default: 'github-runner'
+        options:
+        - github-runner
+        - vpc
+        - rds
+jobs:
+  validate-terraform-resources:
+    runs-on: [self-hosted]
+
+    defaults:
+      run: 
+        working-directory: modules/${{ inputs.resource_deployment }}/
+
+    steps:
+      - name: Checkout specific branch
+        uses: actions/checkout@v3
+        with:
+          ref: "refs/heads/${{ inputs.branch }}"
+
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt -check
+
+      - name: Terraform Init
+        id: init
+        run: |
+            terraform init -backend-config='key=${{ inputs.env }}/${{ inputs.resource_deployment }}/terraform.tfstate'
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+            terraform plan -no-color -input=false -var-file=${{ inputs.env }}.tfvars
+
+        continue-on-error: true
+
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
