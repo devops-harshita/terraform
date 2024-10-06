@@ -21,7 +21,7 @@ on:
         - rds
 jobs:
   validate-terraform-resources:
-    runs-on: [self-hosted]
+    runs-on: [ubuntu-latest, self-hosted]
 
     defaults:
       run: 
